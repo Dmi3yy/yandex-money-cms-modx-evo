@@ -10,7 +10,7 @@ if(!function_exists('YandexMoneyForm')){
 			$mod_table = $dbprefix."yandexmoney"; //таблица модуля
 			
 			$data_query = $modx->db->select("*", $mod_table, "", "id ASC", ""); 
-			$row = mysql_fetch_assoc($data_query);
+			$row = $modx->db->getRow($data_query);
 			$config = unserialize($row['config']);
 			
 			$ym = new Yandexmoney($config);
@@ -22,7 +22,7 @@ if(!function_exists('YandexMoneyForm')){
 				$orderId = (int)$fields['orderID'];
 				
 				$order_query = $modx->db->select("*", $modx->getFullTableName('manager_shopkeeper'), 'id = ' . $orderId, "", "");
-				$order = mysql_fetch_array($order_query);
+				$order = $modx->db->getRow($order_query, 'both');
 
 				$data = @unserialize($order['short_txt']);
 				$price = floatval(str_replace(',', '.', $order['price']));
@@ -351,7 +351,8 @@ class Yandexmoney {
 
 	public static function isInstalled($dbname, $mod_table)
 	{
-		$c = mysql_num_rows(mysql_query($sql = "show tables from $dbname like '$mod_table'"));
+		global $modx;
+		$c = $modx->db->getRecordCount($modx->db->query($sql = "show tables from $dbname like '$mod_table'"));
 		return ($c > 0);
 	}
 

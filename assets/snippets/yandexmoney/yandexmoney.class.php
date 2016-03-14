@@ -175,7 +175,6 @@ class Yandexmoney {
 
 	public function checkPayMethod(){
 		if (in_array($this->pay_method, array('PC','AC','MC','GP','WM','AB','SB','MA','PB','QW','QP'))) return true;
-		return true;
 	}
 
 	public function getSelectHtml(){

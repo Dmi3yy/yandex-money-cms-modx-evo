@@ -1,5 +1,5 @@
 <?php
-if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.4.0');
+if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.4.1');
 if(!function_exists('YandexMoneyForm')){
 	function YandexMoneyForm(&$fields){
 	  global $modx, $vMsg;
@@ -267,7 +267,7 @@ class Yandexmoney {
 				<html xmlns="http://www.w3.org/1999/xhtml"  lang="en" xml:lang="en">
 				<head>
 				  <link rel="stylesheet" type="text/css" href="media/style/'.$theme.'/style.css" />
-				  <script src="/assets/snippets/yandexmoney/js/jquery.min.js"></script>
+				  <script src="https://yastatic.net/jquery/1.9.1/jquery.min.js"></script>
 				</head>
 				<body>';
 	}
@@ -343,12 +343,12 @@ class Yandexmoney {
           </tr>
 		  
 		  <tr>
-            <td><span class="required">*</span> Выберите способы оплаты:</td>
+            <td><span class="required">*</span> Статус:</td>
             <td>
 				<select name="config[mode]" id="yandexmoney_mode" onchange="yandex_validate_mode();">
-					<option value="1" '.(($this->mode==1 ? 'selected' : '')).'>На счет физического лица в электронной валюте Яндекс.Денег</option>
-					<option value="2" '.(($this->mode==2 ? 'selected' : '')).'>На расчетный счет организации с заключением договора с Яндекс.Деньгами и выбором способа оплаты на стороне магазина</option>
-					<option value="3" '.(($this->mode==3 ? 'selected' : '')).'>На расчетный счет организации с заключением договора с Яндекс.Деньгами и выбором способа оплаты на стороне Яндекс.Кассы</option>
+					<option value="1" '.(($this->mode==1 ? 'selected' : '')).'>Физическое лицо</option>
+					<option value="2" '.(($this->mode==2 ? 'selected' : '')).'>Юридическое лицо (выбор оплаты на стороне магазина)</option>
+					<option value="3" '.(($this->mode==3 ? 'selected' : '')).'>Юридическое лицо (выбор оплаты на стороне Яндекс.Кассы)</option>
 				</select>
 			</td>
           </tr>
@@ -375,9 +375,6 @@ class Yandexmoney {
 			 </td>
           </tr>
 		 <tr  class="select-wo">
-			<td></td>
-			<td><b>Внимание! Этот режим должен быть включен и на стороне сервиса Яндекс.Касса.</b><br>
-				Чтобы активировать этот сценарий, напишите менеджеру Кассы на <a href="mailto:merchants@yamoney.ru">merchants@yamoney.ru</a> или позвоните по телефону 8 800 250-66-99.</td>
 		 </tr>
 		  <tr class="individ">
 			<td></td>
@@ -444,7 +441,7 @@ class Yandexmoney {
       </form>
     </div>
   </div>
-		<script type="text/javascript">
+<script type="text/javascript">
 		function yandex_validate_mode(){
 			var yandex_mode = $("#yandexmoney_mode").val();
 			if (yandex_mode == 1){
@@ -466,9 +463,8 @@ class Yandexmoney {
 		}
 		$( document ).ready(function() {
 			yandex_validate_mode();
-		})
-		</script>
-  ';
+		});
+</script>';
 		return $html;
 	}
 

@@ -1,5 +1,5 @@
 <?php
-if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.4.1');
+if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.4.2');
 if(!function_exists('YandexMoneyForm')){
 	function YandexMoneyForm(&$fields){
 	  global $modx, $vMsg;
@@ -244,13 +244,22 @@ class Yandexmoney {
 	/* оплачивает заказ */
 	public function ProcessResult()
 	{
+	    global $modx;
 		$callbackParams = $_POST;
 		$order_id = false;
+
 		if ($this->checkSign($callbackParams)){
 			if ($this->org_mode){
+
+                $order_query = $modx->db->select("*", $modx->getFullTableName('manager_shopkeeper'), 'id = ' . (int) $callbackParams["orderNumber"], "", "");
+                $order = $modx->db->getRow($order_query, 'both');
+                $price = floatval(str_replace(',', '.', $order['price']));
+
 				if ($callbackParams['action'] == 'paymentAviso'){
 					$order_id = (int)$callbackParams["orderNumber"];
-				}
+				}elseif(number_format($callbackParams['orderSumAmount'], 2) != number_format($price, 2)){
+                    $this->sendCode($callbackParams, 100);
+                }
 			}else{
 				$order_id = (int)$callbackParams["label"];
 			}

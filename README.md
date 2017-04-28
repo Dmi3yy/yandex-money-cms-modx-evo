@@ -76,7 +76,7 @@ default:
 		echo Yandexmoney::adminInstallHtml();
 	}else{
 		$data_query = $modx->db->select("*", $mod_table, "", "id ASC", ""); 
-                $row = mysql_fetch_assoc($data_query);
+                $row = $modx->db->getRow($data_query);
                 $config = unserialize($row['config']);
 		
 		$ym = new Yandexmoney($config);
@@ -100,7 +100,7 @@ if(!defined('YANDEXMONEY_PATH')) {
 require_once YANDEXMONEY_PATH.'yandexmoney.class.php';
 
 $data_query = $modx->db->select("*", $mod_table, "", "id ASC", ""); 
-$row = mysql_fetch_assoc($data_query);
+$row = $modx->db->getRow($data_query);
 $config = unserialize($row['config']);
 $ym = new Yandexmoney($config);
 if ($_POST['payment']){

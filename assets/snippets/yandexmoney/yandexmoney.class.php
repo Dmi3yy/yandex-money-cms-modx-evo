@@ -1,5 +1,5 @@
 <?php
-if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.3.0');
+if (!defined('YANDEXMONEY_VERSION')) define('YANDEXMONEY_VERSION', '1.4.2');
 if(!function_exists('YandexMoneyForm')){
 	function YandexMoneyForm(&$fields){
 	  global $modx, $vMsg;
@@ -10,19 +10,21 @@ if(!function_exists('YandexMoneyForm')){
 			$mod_table = $dbprefix."yandexmoney"; //таблица модуля
 			
 			$data_query = $modx->db->select("*", $mod_table, "", "id ASC", ""); 
-			$row = mysql_fetch_assoc($data_query);
+			$row = $modx->db->getRow($data_query);
 			$config = unserialize($row['config']);
 			
 			$ym = new Yandexmoney($config);
-			$ym->pay_method = $_POST['payment'];
 
-			
+			$ym->pay_method = $_POST['payment'];
+		  	if (isset($_POST['phone'])) $ym->phone = $_POST['phone'];
+		  	if (isset($_POST['email'])) $ym->email = $_POST['email'];
+
 			if ($ym->checkPayMethod()) {
 				
 				$orderId = (int)$fields['orderID'];
 				
 				$order_query = $modx->db->select("*", $modx->getFullTableName('manager_shopkeeper'), 'id = ' . $orderId, "", "");
-				$order = mysql_fetch_array($order_query);
+				$order = $modx->db->getRow($order_query, 'both');
 
 				$data = @unserialize($order['short_txt']);
 				$price = floatval(str_replace(',', '.', $order['price']));
@@ -32,7 +34,6 @@ if(!function_exists('YandexMoneyForm')){
 				$ym->comment = $data['message'];
 				$userLoggedIn = $modx->userLoggedIn();
 				$ym->userId = $userLoggedIn!==false ? $userLoggedIn['id'] : 0;
-				
 				echo $ym->createFormHtml();
 				exit;
 			}
@@ -67,6 +68,10 @@ if(!function_exists('YandexMoneyValidate')){
 
 if (!class_exists('Yandexmoney')){
 class Yandexmoney {
+	private $paymode;
+
+	public $email = false;
+	public $phone = false;
 
 	public $test_mode;
 	public $org_mode;
@@ -114,9 +119,10 @@ class Yandexmoney {
     
     function __construct($config = array()) {
 		
-		$this->org_mode = ($config['mode'] == 2);
+		$this->org_mode = ($config['mode'] >= 2);
 		$this->test_mode = ($config['testmode'] == 1);
 		$this->shopid = ($config['testmode'] == 1);
+		$this->paymode = (bool) ($config['mode'] == 3);
 
 		
 		if (isset($config) && is_array($config)){
@@ -125,61 +131,20 @@ class Yandexmoney {
 			}
 		}
     }
-    
-
-	/**
-	 * Переводит статус заказа в "Оплата получена" (Shopkeeper)
-	 * 
-	 */
-	function shkOrderPaid($order_id){
-		
-		if($order_id){
-			
-			$this->modx->addPackage('shopkeeper', MODX_CORE_PATH."components/shopkeeper/model/");
-			
-			$order = $this->modx->getObject('SHKorder',$order_id);
-			if($order){
-				$order->set('status',$this->modx->config['yandexmonay.payStatusOut']);
-				$order->save();
-				return true;	
-			}	
-		}
-		return false;
-		
-	}
-
 
 	public function getFormUrl(){
-		if (!$this->org_mode){
-			return $this->individualGetFormUrl();
-		}else{
-			return $this->orgGetFormUrl();
-		}
-	}
-
-	public function individualGetFormUrl(){
-		if ($this->test_mode){
-			return 'https://demomoney.yandex.ru/quickpay/confirm.xml';
-		}else{
-			return 'https://money.yandex.ru/quickpay/confirm.xml';
-		}
-	}
-
-	public function orgGetFormUrl(){
-		if ($this->test_mode){
-            return 'https://demomoney.yandex.ru/eshop.xml';
-        } else {
-            return 'https://money.yandex.ru/eshop.xml';
-        }
+		$demo = ($this->test_mode)?'demo':'';
+		$mode = ($this->org_mode)?'/eshop.xml':'/quickpay/confirm.xml';
+		return 'https://'.$demo.'money.yandex.ru'.$mode;
 	}
 
 	public function checkPayMethod(){
-		if (in_array($this->pay_method, array('PC','AC','MC','GP','WM','AB','SB','MA','PB','QW','QP'))) return true;
-		return true;
+		return (in_array($this->pay_method, array('PC','AC','MC','GP','WM','AB','SB','MA','PB','QW','QP')) || $this->paymode);
 	}
 
 	public function getSelectHtml(){
 		if ((int)$this->status === 0)	return '';
+		if ($this->paymode) return "<option value=''>Яндекс.Касса (банковские карты, электронные деньги и другое)</option>";
 		$list_methods=array(
 			'ym'=>array('PC'=>'Оплата из кошелька в Яндекс.Деньгах'),
 			'cards'=>array('AC'=>'Оплата с произвольной банковской карты'),
@@ -193,6 +158,7 @@ class Yandexmoney {
 			'qw'=>array('QW'=>'Оплата через QIWI Wallet'),
 			'qp'=>array('QP'=>'Оплата через доверительный платеж (Куппи.ру)')
 		);
+		$output='';
 		foreach ($list_methods as $long_name=>$method_desc){
 			$by_default=(in_array($long_name, array('ym','cards')))?true:$this->org_mode;
 			if ($this->{'method_'.$long_name} == 1 && $by_default) {
@@ -207,16 +173,20 @@ class Yandexmoney {
 	public function createFormHtml(){
 		global $modx;
 		$site_url = $modx->config['site_url'];
+		$payType = ($this->paymode)?'':$this->pay_method;
+		$addInfo =($this->email!==false)?'<input type="hidden" name="cps_email" value="'.$this->email.'" >':'';
+		$addInfo .= ($this->phone!==false)?'<input type="hidden" name="cps_phone" value="'.$this->phone.'" >':'';
 		if ($this->org_mode){
 			$html = '
 				<form method="POST" action="'.$this->getFormUrl().'"  id="paymentform" name = "paymentform">
-				   <input type="hidden" name="paymentType" value="'.$this->pay_method.'" />
+				   <input type="hidden" name="paymentType" value="'.$payType.'" />
 				   <input type="hidden" name="shopid" value="'.$this->shopid.'">
 				   <input type="hidden" name="scid" value="'.$this->scid.'">
 				   <input type="hidden" name="orderNumber" value="'.$this->orderId.'">
 				   <input type="hidden" name="sum" value="'.$this->orderTotal.'" data-type="number" >
-				   <input type="hidden" name="customerNumber" value="'.$this->userId.'" >
-					<input type="hidden" name="shopSuccessUrl" value="'.$site_url.'assets/snippets/yandexmoney/callback.php?success=1"> 
+				   <input type="hidden" name="customerNumber" value="'.$this->userId.'" >'.
+					$addInfo.
+					'<input type="hidden" name="shopSuccessUrl" value="'.$site_url.'assets/snippets/yandexmoney/callback.php?success=1">
 					<input type="hidden" name="shopFailUrl" value="'.$site_url.'assets/snippets/yandexmoney/callback.php?fail=1">
 				   <input type="hidden" name="cms_name" value="modxevo" >	
 				</form>';
@@ -243,86 +213,60 @@ class Yandexmoney {
 		$html .= '<script type="text/javascript">
 						document.getElementById("paymentform").submit();
 					</script>';
-		echo $html; exit;
-		return $html;
+		echo $html;
+		exit;
 	}
 
 
 	public function checkSign($callbackParams){
-		$string = $callbackParams['action'].';'.$callbackParams['orderSumAmount'].';'.$callbackParams['orderSumCurrencyPaycash'].';'.$callbackParams['orderSumBankPaycash'].';'.$callbackParams['shopId'].';'.$callbackParams['invoiceId'].';'.$callbackParams['customerNumber'].';'.$this->password;
-		$md5 = strtoupper(md5($string));
-		return ($callbackParams['md5']==$md5);
-	}
-
-	public function sendAviso($callbackParams, $code){
-		header("Content-type: text/xml; charset=utf-8");
-		$xml = '<?xml version="1.0" encoding="UTF-8"?>
-			<paymentAvisoResponse performedDatetime="'.date("c").'" code="'.$code.'" invoiceId="'.$callbackParams['invoiceId'].'" shopId="'.$this->shopid.'"/>';
-		echo $xml;
+		if ($this->org_mode){
+			$string = $callbackParams['action'].';'.$callbackParams['orderSumAmount'].';'.$callbackParams['orderSumCurrencyPaycash'].';'.$callbackParams['orderSumBankPaycash'].';'.$callbackParams['shopId'].';'.$callbackParams['invoiceId'].';'.$callbackParams['customerNumber'].';'.$this->password;
+			$md5 = strtoupper(md5($string));
+			return ($callbackParams['md5']==$md5);
+		}else{
+			$string = $callbackParams['notification_type'].'&'.$callbackParams['operation_id'].'&'.$callbackParams['amount'].'&'.$callbackParams['currency'].'&'.$callbackParams['datetime'].'&'.$callbackParams['sender'].'&'.$callbackParams['codepro'].'&'.$this->password.'&'.$callbackParams['label'];
+			$check = (sha1($string) == $callbackParams['sha1_hash']);
+			if (!$check){
+				header('HTTP/1.0 401 Unauthorized');
+				return false;
+			}
+			return true;
+		}
 	}
 
 	public function sendCode($callbackParams, $code){
 		header("Content-type: text/xml; charset=utf-8");
 		$xml = '<?xml version="1.0" encoding="UTF-8"?>
-			<checkOrderResponse performedDatetime="'.date("c").'" code="'.$code.'" invoiceId="'.$callbackParams['invoiceId'].'" shopId="'.$this->shopid.'"/>';
+			<'.$callbackParams['action'].'Response performedDatetime="'.date("c").'" code="'.$code.'" invoiceId="'.$callbackParams['invoiceId'].'" shopId="'.$this->shopid.'"/>';
 		echo $xml;
-	}
-
-	public function checkOrder($callbackParams, $sendCode=FALSE, $aviso=FALSE){ 
-		
-		if ($this->checkSign($callbackParams)){
-			$code = 0;
-		}else{
-			$code = 1;
-		}
-		
-		if ($sendCode){
-			if ($aviso){
-				$this->sendAviso($callbackParams, $code);
-			}else{
-				$this->sendCode($callbackParams, $code);
-			}
-			exit;
-		}else{
-			return $code;
-		}
-	}
-
-	public function individualCheck($callbackParams){
-		$string = $callbackParams['notification_type'].'&'.$callbackParams['operation_id'].'&'.$callbackParams['amount'].'&'.$callbackParams['currency'].'&'.$callbackParams['datetime'].'&'.$callbackParams['sender'].'&'.$callbackParams['codepro'].'&'.$this->password.'&'.$callbackParams['label'];
-		$check = (sha1($string) == $callbackParams['sha1_hash']);
-		if (!$check){
-			header('HTTP/1.0 401 Unauthorized');
-			return false;
-		}
-		return true;
-	
 	}
 
 	/* оплачивает заказ */
 	public function ProcessResult()
 	{
+	    global $modx;
 		$callbackParams = $_POST;
 		$order_id = false;
-		if ($this->org_mode){
-			if ($callbackParams['action'] == 'checkOrder'){
-				$code = $this->checkOrder($callbackParams);
-				$this->sendCode($callbackParams, $code);
-				$order_id = (int)$callbackParams["orderNumber"];
-			}
-			if ($callbackParams['action'] == 'paymentAviso'){
-				$this->checkOrder($callbackParams, TRUE, TRUE);
-			}
-		}else{
-			$check = $this->individualCheck($callbackParams);
-			
-			if (!$check){
-				
+
+		if ($this->checkSign($callbackParams)){
+			if ($this->org_mode){
+
+                $order_query = $modx->db->select("*", $modx->getFullTableName('manager_shopkeeper'), 'id = ' . (int) $callbackParams["orderNumber"], "", "");
+                $order = $modx->db->getRow($order_query, 'both');
+                $price = floatval(str_replace(',', '.', $order['price']));
+
+				if ($callbackParams['action'] == 'paymentAviso'){
+					$order_id = (int)$callbackParams["orderNumber"];
+				}elseif(number_format($callbackParams['orderSumAmount'], 2) != number_format($price, 2)){
+                    $this->sendCode($callbackParams, 100);
+                }
 			}else{
 				$order_id = (int)$callbackParams["label"];
 			}
+			$this->sendCode($callbackParams, 0);
+		}else{
+			$this->sendCode($callbackParams, 1);
 		}
-		
 		return $order_id;
 	}
 
@@ -332,7 +276,7 @@ class Yandexmoney {
 				<html xmlns="http://www.w3.org/1999/xhtml"  lang="en" xml:lang="en">
 				<head>
 				  <link rel="stylesheet" type="text/css" href="media/style/'.$theme.'/style.css" />
-				  <script src="/assets/snippets/yandexmoney/js/jquery.min.js"></script>
+				  <script src="https://yastatic.net/jquery/1.9.1/jquery.min.js"></script>
 				</head>
 				<body>';
 	}
@@ -351,7 +295,8 @@ class Yandexmoney {
 
 	public static function isInstalled($dbname, $mod_table)
 	{
-		$c = mysql_num_rows(mysql_query($sql = "show tables from $dbname like '$mod_table'"));
+		global $modx;
+		$c = $modx->db->getRecordCount($modx->db->query($sql = "show tables from $dbname like '$mod_table'"));
 		return ($c > 0);
 	}
 
@@ -386,6 +331,15 @@ class Yandexmoney {
             </select>
 			 </td>
           </tr>
+          <tr class="individ">
+			<td></td>
+			<td><p>Если у вас нет аккаунта в Яндекс-Деньги, то следует зарегистрироваться тут - <a href="https://money.yandex.ru/">https://money.yandex.ru/</a></p><p><b>ВАЖНО!</b> Вам нужно будет указать ссылку для приема HTTP уведомлений здесь - <a href="https://sp-money.yandex.ru/myservices/online.xml" target="_blank">https://sp-money.yandex.ru/myservices/online.xml</a></p></td>
+		 </tr>
+
+		  <tr class="org" style="display: none;">
+			<td></td>
+			<td><p>Для работы с модулем необходимо <a href="https://money.yandex.ru/joinups/">подключить магазин к Яндек.Кассе</a>. После подключения вы получите параметры для приема платежей (идентификатор магазина — shopId и номер витрины — scid).</p></td>
+		 </tr>
 		 <tr>
             <td><span class="required">*</span> Использовать в тестовом режиме?</td>
             <td>
@@ -398,22 +352,24 @@ class Yandexmoney {
           </tr>
 		  
 		  <tr>
-            <td><span class="required">*</span> Выберите способы оплаты:</td>
+            <td><span class="required">*</span> Статус:</td>
             <td>
 				<select name="config[mode]" id="yandexmoney_mode" onchange="yandex_validate_mode();">
-					<option value="1" '.(($this->mode==1 ? 'selected' : '')).'>На счет физического лица в электронной валюте Яндекс.Денег</option>
-					<option value="2" '.(($this->mode==2 ? 'selected' : '')).'>На расчетный счет организации с заключением договора с Яндекс.Деньгами</option>
+					<option value="1" '.(($this->mode==1 ? 'selected' : '')).'>Физическое лицо</option>
+					<option value="2" '.(($this->mode==2 ? 'selected' : '')).'>Юридическое лицо (выбор оплаты на стороне магазина)</option>
+					<option value="3" '.(($this->mode==3 ? 'selected' : '')).'>Юридическое лицо (выбор оплаты на стороне Яндекс.Кассы)</option>
 				</select>
 			</td>
           </tr>
-
-		   <tr>
+		   <tr class="select-w">
             <td><span class="required">*</span> Укажите необходимые способы оплаты:</td>
             <td>
-				<input type="checkbox" name="config[method_ym]" value="1" id="ym_method_1" '.(($this->method_ym==1 ? 'checked' : '')).'><label for="ym_method_1" style="width: 280px; text-align: left;">Кошелек Яндекс.Деньги</label> <br>
-				
-				<input type="checkbox" name="config[method_cards]" value="1" id="ym_method_2" '.(($this->method_cards==1 ? 'checked' : '')).'><label for="ym_method_2" style="width: 280px; text-align: left;">Банковская карта</label> <br>
-				
+				<input type="checkbox" name="config[method_ym]" value="1" id="ym_method_1" '.(($this->method_ym==1 ? 'checked' : '')).'>
+				<label for="ym_method_1" style="width: 280px; text-align: left;">Кошелек Яндекс.Деньги</label>
+				<br>
+				<input type="checkbox" name="config[method_cards]" value="1" id="ym_method_2" '.(($this->method_cards==1 ? 'checked' : '')).'>
+				<label for="ym_method_2" style="width: 280px; text-align: left;">Банковская карта</label>
+				<br>
 				<div class="org" style="display:none;">
 					<input type="checkbox" name="config[method_cash]" value="1" id="ym_method_3" '.(($this->method_cash==1 ? 'checked' : '')).'><label for="ym_method_3" style="width: 280px; text-align: left;">Наличными через кассы и терминалы</label> <br>
 					<input type="checkbox" name="config[method_mobile]" value="1" id="ym_method_4" '.(($this->method_mobile==1 ? 'checked' : '')).'><label for="ym_method_4" style="width: 280px; text-align: left;">Счет мобильного телефона</label> <br>
@@ -427,17 +383,8 @@ class Yandexmoney {
 				</div>
 			 </td>
           </tr>
-		
-		 <tr class="individ">
-			<td></td>
-			<td><p>Если у вас нет аккаунта в Яндекс-Деньги, то следует зарегистрироваться тут - <a href="https://money.yandex.ru/">https://money.yandex.ru/</a></p><p><b>ВАЖНО!</b> Вам нужно будет указать ссылку для приема HTTP уведомлений здесь - <a href="https://sp-money.yandex.ru/myservices/online.xml" target="_blank">https://sp-money.yandex.ru/myservices/online.xml</a></p></td>
+		 <tr  class="select-wo">
 		 </tr>
-
-		  <tr class="org" style="display: none;">
-			<td></td>
-			<td><p>Для работы с модулем необходимо <a href="https://money.yandex.ru/joinups/">подключить магазин к Яндек.Кассе</a>. После подключения вы получите параметры для приема платежей (идентификатор магазина — shopId и номер витрины — scid).</p></td>
-		 </tr>
-	
 		  <tr class="individ">
 			<td></td>
 			<td>
@@ -466,7 +413,7 @@ class Yandexmoney {
 				  </tr>
 				   <tr>
 						<td style="border: 1px black solid; padding: 5px;">checkUrl/avisoUrl</td>
-						<td style="border: 1px black solid; padding: 5px;">'.$site_url.'assets/snippets/yandexmoney/callback.php</td>
+						<td style="border: 1px black solid; padding: 5px;">'.str_replace("http://","https://",$site_url).'assets/snippets/yandexmoney/callback.php</td>
 				   </tr>
 				   <tr>
 						<td style="border: 1px black solid; padding: 5px;">successURL/failURL</td>
@@ -481,12 +428,6 @@ class Yandexmoney {
             <td><input type="text" name="config[account]" value="'.$this->account.'">
               </td>
           </tr>
-
-		  <tr>
-            <td><span class="required">*</span> Секретное слово (shopPassword) для обмена сообщениями:</td>
-            <td><input type="text" name="config[password]" value="'.$this->password.'">
-              </td>
-          </tr>
           <tr class="org" style="display: none;">
             <td><span class="required">*</span> Идентификатор вашего магазина в Яндекс.Деньгах (ShopID):</td>
             <td><input type="text" name="config[shopid]" value="'.$this->shopid.'">
@@ -497,6 +438,11 @@ class Yandexmoney {
             <td><input type="text" name="config[scid]" value="'.$this->scid.'">
               </td>
           </tr>
+          <tr>
+            <td><span class="required">*</span> Секретное слово (shopPassword) для обмена сообщениями:</td>
+            <td><input type="text" name="config[password]" value="'.$this->password.'">
+              </td>
+          </tr>
         </tbody></table>
 		<br/>
 		<input type="submit" value="Сохранить" />
@@ -504,22 +450,30 @@ class Yandexmoney {
       </form>
     </div>
   </div>
-		<script type="text/javascript">
+<script type="text/javascript">
 		function yandex_validate_mode(){
 			var yandex_mode = $("#yandexmoney_mode").val();
 			if (yandex_mode == 1){
 				$(".individ").show();
 				$(".org").hide();
-			}else{
-				$(".org").show();
+				$(".select-w").show();
+				$(".select-wo").hide();
+			}else {
 				$(".individ").hide();
+				$(".org").show();
+				if(yandex_mode == 2){
+					$(".select-w").show();
+					$(".select-wo").hide();
+				}else{
+					$(".select-w").hide();
+					$(".select-wo").show();
+				}
 			}
 		}
 		$( document ).ready(function() {
 			yandex_validate_mode();
-		})
-		</script>
-  ';
+		});
+</script>';
 		return $html;
 	}
 
@@ -541,15 +495,13 @@ class yamoney_statistics {
 			'email' => $modx->config['emailsender'],
 			'shopid' => $config['shopid'],
 			'settings' => array(
-				'kassa' => (bool)($config['mode']==2),
+				'kassa_epl' => (bool)($config['mode']==3),
+				'kassa' => (bool)($config['mode']>=2),
 				'p2p'=> (bool)($config['mode']!=2)
 			)
 		);
-
-		$key_crypt = gethostbyname($_SERVER['HTTP_HOST']);
-		$array_crypt = $this->crypt_encrypt($array, $key_crypt);
-
-		$url = 'https://statcms.yamoney.ru/';
+		$array_crypt = base64_encode(serialize($array));
+		$url = 'https://statcms.yamoney.ru/v2/';
 		$curlOpt = array(
 			CURLOPT_HEADER => false,
 			CURLOPT_RETURNTRANSFER => true,
@@ -560,7 +512,7 @@ class yamoney_statistics {
 		);
 
 		$curlOpt[CURLOPT_HTTPHEADER] = array('Content-Type: application/x-www-form-urlencoded');
-		$curlOpt[CURLOPT_POSTFIELDS] = http_build_query(array('data' => $array_crypt));
+		$curlOpt[CURLOPT_POSTFIELDS] = http_build_query(array('data' => $array_crypt, 'lbl'=> 0));
 
 		$curl = curl_init($url);
 		curl_setopt_array($curl, $curlOpt);
@@ -569,27 +521,12 @@ class yamoney_statistics {
 		$error = curl_error($curl);
 		$rcode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 		curl_close($curl);
-	}
-	
-	private function crypt_encrypt($data, $key)
-	{
-		$key = hash('sha256', $key, true);
-		$data = serialize($data);
-		$init_size = mcrypt_get_iv_size(MCRYPT_RIJNDAEL_256, MCRYPT_MODE_CBC);
-		$init_vect = mcrypt_create_iv($init_size, MCRYPT_RAND);
-		$str = $this->randomString(strlen($key)).$init_vect.mcrypt_encrypt(MCRYPT_RIJNDAEL_256, $key, $data, MCRYPT_MODE_CBC, $init_vect);
-		return base64_encode($str);
-	}
-
-	private function randomString($len)
-	{
-		$str = '';
-		$pool = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-		$pool_len = strlen($pool);
-		for ($i = 0; $i < $len; $i++) {
-			$str .= substr($pool, mt_rand(0, $pool_len - 1), 1);
+		$json=json_decode($rbody);
+		if ($rcode==200 && isset($json->new_version)){
+			return $json->new_version;
+		}else{
+			return false;
 		}
-		return $str;
 	}
 }
 }

@@ -23,7 +23,7 @@ $mod_table = $dbprefix."yandexmoney";
 
 
 $data_query = $modx->db->select("*", $mod_table, "", "id ASC", ""); 
-$row = mysql_fetch_assoc($data_query);
+$row = $modx->db->getRow($data_query);
 $config = unserialize($row['config']);
 
 
